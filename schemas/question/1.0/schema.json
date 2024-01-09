@@ -35,6 +35,13 @@
         "type": "string"
       }
     },
+    "assessmentType": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "default": "Self"
+      }
+    },
     "visibility": {
       "type": "string",
       "default": "Default",
