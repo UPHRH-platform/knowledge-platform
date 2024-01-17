@@ -158,7 +158,8 @@
         "Draft",
         "Review",
         "Live",
-        "Retired"
+        "Retired",
+        "Rejected"
       ],
       "default": "Draft"
     },

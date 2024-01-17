@@ -43,7 +43,8 @@
         "Processing",
         "FlagDraft",
         "FlagReview",
-        "Failed"
+        "Failed",
+        "Rejected"
       ],
       "default": "Draft"
     },
@@ -975,7 +976,7 @@
       "type": "array"
     },
     "difficultyLevel" : {
-      "type": "string"
+      "type": "array"
     },
     "board" : {
       "type": "string"
