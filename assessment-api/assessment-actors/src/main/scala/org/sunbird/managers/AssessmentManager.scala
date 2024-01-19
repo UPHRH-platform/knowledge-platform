@@ -52,11 +52,6 @@ object AssessmentManager {
 		channelOption.foreach { channel =>
 			request.getRequest.put("channel", channel.asInstanceOf[AnyRef])
 		}
-		val assessmentTypeOption: Option[String] = request.headers.get("assessmentType")
-		// Check if the assessmentType is present
-		assessmentTypeOption.foreach { assessmentType =>
-			request.getRequest.put("assessmentType", assessmentType.asInstanceOf[AnyRef])
-		}
 		create(request, errCode)
 	}
 

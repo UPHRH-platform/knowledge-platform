@@ -151,7 +151,6 @@ class QuestionController @Inject()(@Named(ActorNames.QUESTION_ACTOR) questionAct
     val futures = questions.get.map(question => {
       val headers = commonHeaders(request.headers)
       headers.put("channel", question.get("channel"))
-      headers.put("questionType", question.get("assessmentType"))
       question.putAll(headers)
       logger.info("put headers  " + headers)
       logger.info("creating question := {}", questions.toString)
