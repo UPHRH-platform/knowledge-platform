@@ -269,7 +269,7 @@ object QuestionExcelParser {
     question.put(Constants.TEMPLATE_ID, "mcq-vertical")
     question.put(Constants.ANSWER, answer)
     question.put("channel", channel)
-    question.put("assessmentType",assessmentType)
+    setArrayValue(question,assessmentType,"assessmentType")
     question
   }
 
