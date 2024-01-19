@@ -114,7 +114,7 @@ class QuestionController @Inject()(@Named(ActorNames.QUESTION_ACTOR) questionAct
   def list(fields: Option[String]) = {
     fetchQuestions(fields, false)
   }
-  
+
   def reject(identifier: String) = Action.async { implicit request =>
     val headers = commonHeaders()
     val body = requestBody()

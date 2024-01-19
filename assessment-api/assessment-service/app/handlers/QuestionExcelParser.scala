@@ -1,12 +1,15 @@
 package handlers
 
+import com.fasterxml.jackson.databind.ObjectMapper
 import org.apache.commons.lang3.StringUtils
 import org.apache.poi.ss.usermodel.CellType
 import org.apache.poi.xssf.usermodel.{XSSFRow, XSSFWorkbook}
 import org.slf4j.{Logger, LoggerFactory}
 import org.sunbird.cache.impl.RedisCache
 import utils.Constants
-import java.io.{File, FileInputStream}
+
+import java.io.{BufferedReader, File, FileInputStream, FileNotFoundException, IOException, InputStreamReader}
+import java.net.{HttpURLConnection, URL}
 import java.util
 import scala.collection.JavaConverters._
 import scala.util.control.Breaks._
@@ -45,6 +48,91 @@ object QuestionExcelParser {
 
     catch {
       case e: Exception => throw new Exception("Invalid File")
+    }
+  }
+  def validateQuestions(questions: List[Map[String, Any]]): List[Map[String, Any]] = {
+    val competencyCodes: Seq[String] = questions.flatMap {
+      case question: Map[String, Any] @unchecked =>
+        question.get("Competency Code") match {
+          case Some(codes: java.util.List[String] @unchecked) => codes.asScala
+          case _ => Seq.empty[String]
+        }
+      case _ => Seq.empty[String]
+    }
+    val competencyLevels: Seq[String] = questions.flatMap {
+      case question: Map[String, Any] @unchecked =>
+        question.get("Competency Level").collect {
+          case levels: java.util.List[String] @unchecked => levels.asScala
+        }.getOrElse(Seq.empty[String])
+      case _ => Seq.empty[String]
+    }
+    questions.map { question =>
+      val validCompetencyCodes: Seq[String] = question match {
+        case q: Map[String, Any] @unchecked =>
+          q.get("competencyCodes") match {
+            case Some(codes: java.util.List[String] @unchecked) => codes.asScala.filter(competencyCodes.contains)
+            case _ => Seq.empty[String]
+          }
+        case _ => Seq.empty[String]
+      }
+      val validCompetencyLevels: Seq[String] = question match {
+        case q: Map[String, Any] @unchecked =>
+          q.get("competencyLevels") match {
+            case Some(levels: java.util.List[String] @unchecked) => Option(levels.asScala).getOrElse(Seq.empty[String]).filter(competencyLevels.contains)
+            case _ => Seq.empty[String]
+          }
+        case _ => Seq.empty[String]
+      }
+      question
+    }
+  }
+  def frameworkRead(frameworkUrl: String): Map[String, Map[String, Object]] = {
+    try {
+      val url = new URL(frameworkUrl)
+      val connection = url.openConnection().asInstanceOf[HttpURLConnection]
+      connection.setRequestMethod("GET")
+
+      val reader = new BufferedReader(new InputStreamReader(connection.getInputStream))
+      val response = new StringBuilder()
+      var line: String = null
+
+      while ({line = reader.readLine(); line != null}) {
+        response.append(line)
+      }
+
+      val responseBody = response.toString()
+
+      val objectMapper = new ObjectMapper()
+      val frameworkJson = objectMapper.readTree(responseBody)
+
+      val competencyMap = for {
+        category <- frameworkJson.get("result").get("framework").get("categories").elements().asScala
+        if (category.get("code").asText() == "subject")
+        term <- category.get("terms").elements().asScala
+      } yield {
+        val competencyName = term.get("name").asText()
+        val competencyId = term.get("identifier").asText()
+
+        val levelsMap = term.get("associations") match {
+          case null => Map.empty[String, Map[String, String]] // or any default value
+          case assocArray if assocArray.isArray =>
+            assocArray.elements().asScala.flatMap { association =>
+              val levelName = association.get("name").asText()
+              val levelId = association.get("identifier").asText()
+              val levelDetails = Map("levelName" -> levelName)
+              Some(levelId -> levelDetails)
+            }.toMap
+          case _ => Map.empty[String, Map[String, String]] // or any default value
+        }
+
+        val competencyDetails = Map("competencyName" -> competencyName, "levels" -> levelsMap)
+        (competencyId, competencyDetails)
+      }
+      competencyMap.toMap
+    } catch {
+      case ioException: IOException =>
+        ioException.printStackTrace()
+        Map.empty[String, Map[String, Object]] // Return an empty map in case of an exception
     }
   }
 
@@ -114,7 +202,7 @@ object QuestionExcelParser {
     val board = rowContent.apply(12).trim
     val channel = rowContent.apply(13).trim
     val maxScore:Integer = rowContent.apply(14).trim.toDouble.intValue()
-
+    val assessmentType = rowContent.apply(15)
 
     var i = -1
     val options = new util.ArrayList[util.Map[String, AnyRef]](rowContent.apply(9).split("\n").filter(StringUtils.isNotBlank).map(o => {
@@ -181,6 +269,7 @@ object QuestionExcelParser {
     question.put(Constants.TEMPLATE_ID, "mcq-vertical")
     question.put(Constants.ANSWER, answer)
     question.put("channel", channel)
+    question.put("assessmentType",assessmentType)
     question
   }
 
