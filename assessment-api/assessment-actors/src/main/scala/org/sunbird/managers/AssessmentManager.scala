@@ -47,7 +47,16 @@ object AssessmentManager {
 		if(isLive){
 			request.getRequest.put("status", "Live".asInstanceOf[AnyRef])
 		}
-		request.getRequest.put("channel", "0137236648666234880".asInstanceOf[AnyRef])
+		val channelOption: Option[String] = request.headers.get("channel")
+		// Check if the channel is present
+		channelOption.foreach { channel =>
+			request.getRequest.put("channel", channel.asInstanceOf[AnyRef])
+		}
+		val assessmentTypeOption: Option[String] = request.headers.get("assessmentType")
+		// Check if the assessmentType is present
+		assessmentTypeOption.foreach { assessmentType =>
+			request.getRequest.put("assessmentType", assessmentType.asInstanceOf[AnyRef])
+		}
 		create(request, errCode)
 	}
 
