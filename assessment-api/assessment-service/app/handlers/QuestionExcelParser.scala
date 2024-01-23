@@ -2,15 +2,17 @@ package handlers
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import org.apache.commons.lang3.StringUtils
-import org.apache.poi.ss.usermodel.CellType
+import org.apache.poi.ss.usermodel.{CellType, Row}
 import org.apache.poi.xssf.usermodel.{XSSFRow, XSSFWorkbook}
 import org.slf4j.{Logger, LoggerFactory}
 import org.sunbird.cache.impl.RedisCache
 import utils.Constants
 
-import java.io.{BufferedReader, File, FileInputStream, FileNotFoundException, IOException, InputStreamReader}
+import java.io._
 import java.net.{HttpURLConnection, URL}
 import java.util
+import java.util.Collections
+import scala.collection.JavaConversions.mapAsScalaMap
 import scala.collection.JavaConverters._
 import scala.util.control.Breaks._
 
@@ -18,80 +20,82 @@ object QuestionExcelParser {
 
   private val logger: Logger = LoggerFactory.getLogger(RedisCache.getClass.getCanonicalName)
 
-  def getQuestions(fileName: String, file: File) = {
+  def getQuestions(fileName: String, file: File): Option[IndexedSeq[Map[String, AnyRef]]] = {
     try {
       val workbook = new XSSFWorkbook(new FileInputStream(file))
-      val sheets = (0 until workbook.getNumberOfSheets).map(index => workbook.getSheetAt(index))  // iterates over the excelsheet
-      sheets.flatMap(sheet => {
-        logger.info("Inside the getQuestions")
-        (1 until sheet.getPhysicalNumberOfRows)  // iterates over each row in the sheet
-          .filter(rowNum => {
-            val oRow = Option(sheet.getRow(rowNum))
-            // matching the row value to determine the value of objects
-            oRow match {
-              case Some(x) => {
-                val questionType = sheet.getRow(rowNum).getCell(11)
-                val isMCQ = questionType.toString.trim.equalsIgnoreCase(Constants.MCQ_SINGLE_SELECT)// checks questionType is MCQ
-                //val isMTF = Constants.MTF.equals(questionType.toString) || Constants.MATCH_THE_FOLLOWING.equals(questionType.toString)
-                //val isFITB = Constants.FITB.equals(questionType.toString)
-                val answerCell = sheet.getRow(rowNum).getCell(10)
-                val isAnswerNotBlank = answerCell.getCellType() != CellType.BLANK
-                //isMCQ || isMTF || isFITB && isAnswerNotBlank
-                isMCQ && isAnswerNotBlank
-              }
-              case None => false
-            }
-          })
-          .map(rowNum => parseQuestion(sheet.getRow(rowNum))).toList
-      })
-    }
+      val sheets = (0 until workbook.getNumberOfSheets).map(index => workbook.getSheetAt(index))
 
-    catch {
-      case e: Exception => throw new Exception("Invalid File")
+      val filteredQuestions = sheets.flatMap(sheet => {
+        logger.info("Inside the getQuestions")
+
+        (1 until sheet.getPhysicalNumberOfRows)
+          .filter(rowNum => {
+            val oRow: Option[Row] = Option(sheet.getRow(rowNum))
+            oRow.exists(row => {
+              val questionType = row.getCell(11)
+              val isMCQ = questionType.toString.trim.equalsIgnoreCase(Constants.MCQ_SINGLE_SELECT)
+              val answerCell = row.getCell(10)
+              val isAnswerNotBlank = answerCell.getCellType() != CellType.BLANK
+              isMCQ && isAnswerNotBlank
+            })
+          })
+          .map(rowNum => parseQuestion(sheet.getRow(rowNum)).toMap).toList
+      })
+
+      Some(filteredQuestions.toIndexedSeq)
+    } catch {
+      case e: Exception =>
+        logger.error("Error while processing Excel file", e)
+        None
     }
   }
-  def validateQuestions(questions: List[Map[String, Any]]): List[Map[String, Any]] = {
-    val competencyCodes: Seq[String] = questions.flatMap {
-      case question: Map[String, Any] @unchecked =>
-        question.get("Competency Code") match {
-          case Some(codes: java.util.List[String] @unchecked) => codes.asScala
+  def validateQuestions(questions: Option[IndexedSeq[Map[String, AnyRef]]]): List[Map[String, Any]] = {
+    logger.info("Inside the validateQuestions")
+    questions.map { questionSeq =>
+      val competencyCodes: Seq[String] = questionSeq.flatMap {
+        case q: Map[String, Any] @unchecked =>
+          q.get("Competency Code") match {
+            case Some(codes: java.util.List[String] @unchecked) => codes.asScala
+            case _ => Seq.empty[String]
+          }
+        case _ => Seq.empty[String]
+      }
+      val difficultyLevel: Seq[String] = questionSeq.flatMap {
+        case q: Map[String, Any] @unchecked =>
+          q.get("difficultyLevel").collect {
+            case levels: java.util.List[String] @unchecked => levels.asScala
+          }.getOrElse(Seq.empty[String])
+        case _ => Seq.empty[String]
+      }
+
+      val validatedQuestions = questionSeq.map { question =>
+        val validCompetencyCodes: Seq[String] = question match {
+          case q: Map[String, Any] @unchecked =>
+            q.get("competencyCodes") match {
+              case Some(codes: java.util.List[String] @unchecked) => codes.asScala.filter(competencyCodes.contains)
+              case _ => Seq.empty[String]
+            }
           case _ => Seq.empty[String]
         }
-      case _ => Seq.empty[String]
-    }
-    val competencyLevels: Seq[String] = questions.flatMap {
-      case question: Map[String, Any] @unchecked =>
-        question.get("Competency Level").collect {
-          case levels: java.util.List[String] @unchecked => levels.asScala
-        }.getOrElse(Seq.empty[String])
-      case _ => Seq.empty[String]
-    }
-    questions.map { question =>
-      val validCompetencyCodes: Seq[String] = question match {
-        case q: Map[String, Any] @unchecked =>
-          q.get("competencyCodes") match {
-            case Some(codes: java.util.List[String] @unchecked) => codes.asScala.filter(competencyCodes.contains)
-            case _ => Seq.empty[String]
-          }
-        case _ => Seq.empty[String]
+        val validDifficultyLevels: Seq[String] = question match {
+          case q: Map[String, Any] @unchecked =>
+            q.get("difficultyLevel") match {
+              case Some(levels: java.util.List[String] @unchecked) => Option(levels.asScala).getOrElse(Seq.empty[String]).filter(difficultyLevel.contains)
+              case _ => Seq.empty[String]
+            }
+          case _ => Seq.empty[String]
+        }
+        question
       }
-      val validCompetencyLevels: Seq[String] = question match {
-        case q: Map[String, Any] @unchecked =>
-          q.get("competencyLevels") match {
-            case Some(levels: java.util.List[String] @unchecked) => Option(levels.asScala).getOrElse(Seq.empty[String]).filter(competencyLevels.contains)
-            case _ => Seq.empty[String]
-          }
-        case _ => Seq.empty[String]
-      }
-      question
-    }
+      validatedQuestions.toList
+    }.getOrElse(List.empty[Map[String, Any]])
   }
   def frameworkRead(frameworkUrl: String): Map[String, Map[String, Object]] = {
     try {
       val url = new URL(frameworkUrl)
       val connection = url.openConnection().asInstanceOf[HttpURLConnection]
       connection.setRequestMethod("GET")
-
+      logger.info("Inside frameworkRead")
       val reader = new BufferedReader(new InputStreamReader(connection.getInputStream))
       val response = new StringBuilder()
       var line: String = null
@@ -158,7 +162,7 @@ object QuestionExcelParser {
     mapOption
   }
 
-  def buildInteractionMap(option: String, level: Integer) = {
+  def buildInteractionMap(option: String, level: String) = {
     val mapOptionValue = new java.util.HashMap().asInstanceOf[java.util.Map[String, AnyRef]]
     mapOptionValue.put(Constants.LABEL, option)
     mapOptionValue.put(Constants.VALUE, level)
@@ -182,99 +186,87 @@ object QuestionExcelParser {
     boolean
   }
 
-  def parseQuestion(xssFRow: XSSFRow) = {
+  def parseQuestion(xssFRow: XSSFRow): java.util.Map[String, AnyRef] = {
     val question = buildDefaultQuestion()
-
     val rowContent = (0 until xssFRow.getPhysicalNumberOfCells)
-      .map(colId => Option(xssFRow.getCell(colId)).getOrElse("").toString).toList
+      .map(colId => Option(xssFRow.getCell(colId)).getOrElse("").toString.trim)
 
-    //fetches data from sheet
-    // this is the role(medium)
-    val medium = rowContent.apply(0)
-    // this is competency label
-    val subject = rowContent.apply(1)
-    // this val is for competency level label
-    val difficultyLevel = rowContent.apply(5)
-    // this val is for activity(GradeLevel)
-    val gradeLevel = rowContent.apply(7)
-    val questionText = rowContent.apply(8)
-    val answer = rowContent.apply(10).trim
-    val board = rowContent.apply(12).trim
-    val channel = rowContent.apply(13).trim
-    val maxScore:Integer = rowContent.apply(14).trim.toDouble.intValue()
-    val assessmentType = rowContent.apply(15)
+    // Extracting values from the row content
+    val medium = rowContent(0)
+    val subject = rowContent(1)
+    val difficultyLevel = rowContent(5)
+    val gradeLevel = rowContent(7)
+    val questionText = rowContent(8)
+    val answer = rowContent(10)
+    val board = rowContent(12)
+    val channel = rowContent(13)
+    val maxScore = rowContent(14).toDouble.toInt
+    val assessmentType = rowContent(15)
 
-    var i = -1
-    val options = new util.ArrayList[util.Map[String, AnyRef]](rowContent.apply(9).split("\n").filter(StringUtils.isNotBlank).map(o => {
-      val option = o.split("[)]").toList
-      val optSeq = option.apply(0).trim
+    // Extracting options from the row content
+    val options = rowContent(9).split("\n").filter(StringUtils.isNotBlank).zipWithIndex.map {
+      case (option, index) => buildOptionMap(option.split("[)]")(1).trim, index, isOptionAnswer(option.split("[)]")(0).trim, answer))
+    }.toList.asJava
 
-      val optText = option.apply(1).trim
-      i += 1
-      buildOptionMap(optText, i, isOptionAnswer(optSeq, answer))
-    }).toList.asJava)
+    // Building response1 map
+    val response1 =  {
+      val mapResponse = new util.HashMap[String, AnyRef]()
+      mapResponse.put(Constants.MAX_SCORE, maxScore.asInstanceOf[AnyRef])
+      mapResponse.put(Constants.CARDINALITY, "single")
+      mapResponse.put(Constants.TYPE, "integer")
 
-    var j = -1
-    val mapRepsonse = new util.HashMap().asInstanceOf[util.Map[String, AnyRef]]
-    val repsonse1 = new util.HashMap().asInstanceOf[util.Map[String, AnyRef]]
-    val responseDeclarationOption = new util.ArrayList[util.Map[String, AnyRef]](rowContent.apply(9).split("\n").filter(StringUtils.isNotBlank).map(o => {
-      val option = o.split("[)]").toList
-      val optSeq = option.apply(0).trim
+      val mapCorrectResponse = new util.HashMap[String, AnyRef]()
+      mapCorrectResponse.put(Constants.VALUE, answer)
 
-      val optText = option.apply(1).trim
-      j += 1
-      if(isOptionAnswer(optSeq, answer)){
-        mapRepsonse.put(Constants.MAX_SCORE,maxScore.asInstanceOf[AnyRef])
-        mapRepsonse.put(Constants.CARDINALITY, "single")
-        mapRepsonse.put(Constants.TYPE, "integer")
-        val mapCorrectResponse = new util.HashMap().asInstanceOf[util.Map[String, AnyRef]]
-        mapCorrectResponse.put(Constants.VALUE, String.valueOf(j))
-        val mapOutcomes = new util.HashMap().asInstanceOf[util.Map[String, AnyRef]]
-        mapOutcomes.put(Constants.SCORE, maxScore.asInstanceOf[AnyRef])
-        mapCorrectResponse.put(Constants.OUTCOMES, mapOutcomes)
-        mapRepsonse.put(Constants.CORRECT_RESPONSE, mapCorrectResponse)
-        mapRepsonse.put(Constants.MAPPING, new util.ArrayList())
-      }
-      repsonse1.put("response1", mapRepsonse)
-      repsonse1
-    }).toList.asJava)
+      val mapOutcomes = new util.HashMap[String, AnyRef]()
+      mapOutcomes.put(Constants.SCORE, maxScore.asInstanceOf[AnyRef])
+      mapCorrectResponse.put(Constants.OUTCOMES, mapOutcomes)
 
-    var k = -1
-    val interactionOptions = new util.ArrayList[util.Map[String, AnyRef]](rowContent.apply(9).split("\n").filter(StringUtils.isNotBlank).map(o => {
-      val option = o.split("[)]").toList
-      val optSeq = option.apply(0).trim
+      mapResponse.put(Constants.CORRECT_RESPONSE, mapCorrectResponse)
+      mapResponse.put(Constants.MAPPING, new util.ArrayList())
 
-      val optText = option.apply(1).trim
-      k += 1
-      buildInteractionMap(optText, k)
-    }).toList.asJava)
+      Collections.singletonMap("response1", mapResponse)
+    }
 
-    val mapInteraction: _root_.java.util.Map[_root_.java.lang.String, AnyRef] = createInteractionMap(interactionOptions)
-    val editorState = new util.HashMap().asInstanceOf[util.Map[String, AnyRef]]
+    // Building interactionOptions
+    val interactionOptions = rowContent(9).split("\n").filter(StringUtils.isNotBlank).map { option =>
+      buildInteractionMap(option.split("[)]")(1).trim, difficultyLevel)
+    }.toList.asJava
+
+    // Building interaction map
+    val interactionMap = createInteractionMap(interactionOptions)
+
+
+    // Building editorState map
+    val editorState = new util.HashMap[String, AnyRef]()
     val interactionTypes = new util.ArrayList[String]()
     interactionTypes.add("choice")
+    editorState.put(Constants.OPTIONS, options)
+    editorState.put(Constants.QUESTION, questionText)
+
+    // Assembling the final question map
+    question.putAll(response1)
     question.put(Constants.BOARD, board)
-    question.put(Constants.INTERACTION_TYPES,interactionTypes)
-    question.put(Constants.INTERACTIONS,mapInteraction)
-    question.put(Constants.RESPONSE_DECLARATION,repsonse1)
+    question.put(Constants.INTERACTION_TYPES, interactionTypes)
+    question.put(Constants.INTERACTIONS, interactionMap)
+    question.put(Constants.EDITOR_STATE, editorState)
+
     setArrayValue(question, medium, Constants.medium)
     setArrayValue(question, subject, Constants.subject)
     setArrayValue(question, gradeLevel, Constants.gradeLevel)
     setArrayValue(question, difficultyLevel, Constants.difficultyLevel)
-    editorState.put(Constants.OPTIONS, options)
-    editorState.put(Constants.QUESTION, questionText)
-    logger.info("Inside the parseQuestion")
+
     question.put(Constants.BODY, questionText)
-    question.put(Constants.EDITOR_STATE, editorState)
     question.put(Constants.TEMPLATE_ID, "mcq-vertical")
     question.put(Constants.ANSWER, answer)
     question.put("channel", channel)
-    setArrayValue(question,assessmentType,"assessmentType")
+    setArrayValue(question, assessmentType, "assessmentType")
+
     question
   }
 
 
-  private def createInteractionMap(interactionOptions: util.ArrayList[util.Map[String, AnyRef]]) = {
+  private def createInteractionMap(interactionOptions: util.List[util.Map[String, AnyRef]]) = {
     val mapOption = new util.HashMap().asInstanceOf[util.Map[String, AnyRef]]
     mapOption.put(Constants.TYPE, "choice".asInstanceOf[AnyRef])
     mapOption.put(Constants.OPTIONS, interactionOptions)

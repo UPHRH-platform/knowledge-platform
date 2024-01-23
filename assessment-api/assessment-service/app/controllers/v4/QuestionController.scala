@@ -8,13 +8,14 @@ import org.sunbird.cache.impl.RedisCache
 import org.sunbird.common.dto.Response
 import org.sunbird.utils.AssessmentConstants
 import play.api.libs.json.Json
-import play.api.mvc.ControllerComponents
+import play.api.mvc.{ControllerComponents, Result}
 import utils.{ActorNames, ApiId, JavaJsonUtils, QuestionOperations}
 
 import javax.inject.{Inject, Named}
 import scala.collection.JavaConverters._
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, ExecutionContext, Future}
+
 
 class QuestionController @Inject()(@Named(ActorNames.QUESTION_ACTOR) questionActor: ActorRef, cc: ControllerComponents, actorSystem: ActorSystem)(implicit exec: ExecutionContext) extends BaseController(cc) {
 
@@ -32,10 +33,6 @@ class QuestionController @Inject()(@Named(ActorNames.QUESTION_ACTOR) questionAct
     val questionRequest = getRequest(question, headers, QuestionOperations.createQuestion.toString)
     setRequestContext(questionRequest, version, objectType, schemaName)
     getResult(ApiId.CREATE_QUESTION, questionActor, questionRequest)
-  }
-
-  def read(identifier: String, mode: Option[String], fields: Option[String]) = {
-    readQuestion(identifier, mode, fields, false)
   }
 
   def privateRead(identifier: String, mode: Option[String], fields: Option[String]) = Action.async { implicit request =>
@@ -111,9 +108,6 @@ class QuestionController @Inject()(@Named(ActorNames.QUESTION_ACTOR) questionAct
     getResult(ApiId.SYSTEM_UPDATE_QUESTION, questionActor, questionRequest)
   }
 
-  def list(fields: Option[String]) = {
-    fetchQuestions(fields, false)
-  }
 
   def reject(identifier: String) = Action.async { implicit request =>
     val headers = commonHeaders()
@@ -139,37 +133,54 @@ class QuestionController @Inject()(@Named(ActorNames.QUESTION_ACTOR) questionAct
 
   //Create question by uploading excel file
   def uploadExcel() = Action(parse.multipartFormData) { implicit request =>
-    logger.info("Inside upload excel")
-    val questions = request.body
-      .file("file")
-      .map { filePart =>
-        val absolutePath = filePart.ref.path.toAbsolutePath
-        val fileName: String = filePart.filename
-        QuestionExcelParser.getQuestions(fileName, absolutePath.toFile)
+    val result: Option[Result] = request.body.file("file").map { filePart =>
+      val absolutePath = filePart.ref.path.toAbsolutePath
+      val fileName: String = filePart.filename
+      val questions: Option[IndexedSeq[Map[String, AnyRef]]] = QuestionExcelParser.getQuestions(fileName, absolutePath.toFile)
+
+      // Step 2: Validate questions based on competency and competency levels
+      val validatedQuestions: List[Map[String, Any]] = QuestionExcelParser.validateQuestions(questions)
+
+      // Step 3: Read framework from the API
+      val frameworkUrl = "https://uphrh.in/api/framework/v1/read/nirayama_frccl_fw?categories=difficultyLevel,subject"
+      val frameworkMap = QuestionExcelParser.frameworkRead(frameworkUrl)
+
+      // Step 4: Check if questions are valid against the framework
+      val isQuestionsValid: Boolean = validatedQuestions.forall { question =>
+        val competency: Seq[String] = question.getOrElse("subject", new java.util.ArrayList[String]()).asInstanceOf[java.util.ArrayList[String]].asScala
+        val difficultyLevel: Seq[String] = question.getOrElse("difficultyLevel", new java.util.ArrayList[String]()).asInstanceOf[java.util.ArrayList[String]].asScala
+
+        // Check if competency and competencyLevels are present in the framework
+        competency.forall(frameworkMap.contains) && difficultyLevel.forall(level => frameworkMap.getOrElse(level, Map.empty).nonEmpty)
       }
-    logger.info("questions after parsing " + questions)
-    val futures = questions.get.map(question => {
-      val headers = commonHeaders(request.headers)
-      headers.put("channel", question.get("channel"))
-      question.putAll(headers)
-      logger.info("put headers  " + headers)
-      logger.info("creating question := {}", questions.toString)
-      val questionRequest = getRequest(question, headers, QuestionOperations.createQuestionByBulkUpload.toString)
-      logger.info("After the questionRequest")
-      setRequestContext(questionRequest, version, objectType, schemaName)
-      logger.info("After the setRequestContext")
-      getResponse(ApiId.CREATE_QUESTION, questionActor, questionRequest)
+
+      if (isQuestionsValid) {
+        // Step 5: Process questions if valid
+        val futures = validatedQuestions.map { question =>
+          val headers = commonHeaders(request.headers)
+          val javaQuestion: java.util.Map[String, AnyRef] = question.mapValues(_.asInstanceOf[AnyRef]).asJava
+          val questionRequest = getRequest(javaQuestion, headers, QuestionOperations.createQuestionByBulkUpload.toString)
+          setRequestContext(questionRequest, version, objectType, schemaName)
+          getResponse(ApiId.CREATE_QUESTION, questionActor, questionRequest)
+        }
+
+        // Step 6: Await and handle the result
+        val f = Future.sequence(futures).map(results => results.map(_.asInstanceOf[Response]).groupBy(_.getResponseCode.toString).mapValues(listResult => {
+          listResult.map(result => {
+            setResponseEnvelope(result)
+            JavaJsonUtils.serialize(result.getResult)
+          })
+        })).map(f => Ok(Json.stringify(Json.toJson(f))).as("application/json"))
+
+        Await.result(f, Duration.apply("300s"))
+      } else {
+        // If questions are not valid, respond with an error
+        BadRequest("Invalid questions: competency or competencyLevels not present in the framework")
+      }
     }
-    )
-    logger.info("After the getResponse")
-    val f = Future.sequence(futures).map(results => results.map(_.asInstanceOf[Response]).groupBy(_.getResponseCode.toString).mapValues(listResult => {
-      listResult.map(result => {
-        setResponseEnvelope(result)
-        JavaJsonUtils.serialize(result.getResult)
-      })
-    })).map(f => Ok(Json.stringify(Json.toJson(f))).as("application/json"))
-    logger.info("in Future sequence")
-    Await.result(f, Duration.apply("300s"))
+
+    // Return the result or a default BadRequest if the file is not present
+    result.getOrElse(BadRequest("File not provided"))
   }
 
   def createFrameworkMappingData() = Action(parse.multipartFormData) { implicit request =>
@@ -212,10 +223,12 @@ class QuestionController @Inject()(@Named(ActorNames.QUESTION_ACTOR) questionAct
     logger.info("in Future sequence")
     Await.result(f, Duration.apply("30s"))
   }
+
   def editorList(fields: Option[String]) = {
     fetchQuestions(fields, true)
   }
-  private def fetchQuestions(fields: Option[String], exclusive: Boolean) = Action.async { implicit request =>
+
+  def fetchQuestions(fields: Option[String], exclusive: Boolean) = Action.async { implicit request =>
     val headers = commonHeaders()
     val body = requestBody()
     val question = body.getOrDefault("search", new java.util.HashMap()).asInstanceOf[java.util.Map[String, Object]];
@@ -231,7 +244,16 @@ class QuestionController @Inject()(@Named(ActorNames.QUESTION_ACTOR) questionAct
   def editorRead(identifier: String, mode: Option[String], fields: Option[String]) = {
     readQuestion(identifier, mode, fields, true)
   }
-  private def readQuestion(identifier: String, mode: Option[String], fields: Option[String], exclusive: Boolean) = Action.async { implicit request =>
+
+  def list(fields: Option[String]) = {
+    fetchQuestions(fields, false)
+  }
+
+  def read(identifier: String, mode: Option[String], fields: Option[String]) = {
+    readQuestion(identifier, mode, fields, false)
+  }
+
+  def readQuestion(identifier: String, mode: Option[String], fields: Option[String], exclusive: Boolean) = Action.async { implicit request =>
     val headers = commonHeaders()
     val question = new java.util.HashMap().asInstanceOf[java.util.Map[String, Object]]
     question.putAll(headers)
