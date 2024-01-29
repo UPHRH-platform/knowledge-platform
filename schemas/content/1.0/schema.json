@@ -739,6 +739,9 @@
         "lastUpdatedBy": {
             "type": "string"
         },
+        "reviewedBy": {
+            "type": "string"
+        },
         "lastSubmittedBy": {
             "type": "string"
         },

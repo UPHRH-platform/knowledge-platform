@@ -328,6 +328,7 @@ class ContentActor @Inject() (implicit oec: OntologyEngineContext, ss: StorageSe
       else new ClientException("ERR_INVALID_REQUEST", "Content not in Review status.")
 
 			request.getRequest.put("versionKey", node.getMetadata.get("versionKey"))
+			request.getRequest.put("rejectedBy", "rejectedBy")
 			request.putIn("publishChecklist", null).putIn("publishComment", null)
       //updating node after changing the status
 			RequestUtil.restrictProperties(request)

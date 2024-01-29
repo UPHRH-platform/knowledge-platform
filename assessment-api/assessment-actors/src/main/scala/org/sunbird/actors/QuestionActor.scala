@@ -1,7 +1,6 @@
 package org.sunbird.actors
 
 import com.fasterxml.jackson.databind.ObjectMapper
-import com.fasterxml.jackson.databind.node.{ArrayNode, ObjectNode}
 import org.apache.commons.lang3.StringUtils
 import org.sunbird.`object`.importer.{ImportConfig, ImportManager}
 import org.sunbird.actor.core.BaseActor
@@ -18,7 +17,6 @@ import javax.inject.Inject
 import scala.collection.JavaConverters
 import scala.collection.JavaConverters._
 import scala.concurrent.{ExecutionContext, Future}
-import com.fasterxml.jackson.databind.JsonNode
 
 class QuestionActor @Inject()(implicit oec: OntologyEngineContext) extends BaseActor {
 
@@ -145,7 +143,7 @@ class QuestionActor @Inject()(implicit oec: OntologyEngineContext) extends BaseA
 			updateRequest.getContext.put("identifier", request.getContext.get("identifier"))
 			if(request.getRequest.containsKey("rejectComment"))
 				updateRequest.put("rejectComment", request.get("rejectComment").asInstanceOf[String])
-			updateRequest.putAll(Map("versionKey" -> node.getMetadata.get("versionKey"), "status" -> "Rejected", "prevStatus" -> node.getMetadata.get("status"), "lastStatusChangedOn" -> date, "lastUpdatedOn" -> date).asJava)
+			updateRequest.putAll(Map("versionKey" -> node.getMetadata.get("versionKey"), "status" -> "Rejected", "prevStatus" -> node.getMetadata.get("status"), "lastStatusChangedOn" -> date, "lastUpdatedOn" -> date, "rejectedBy" -> node.getMetadata.get("rejectedBy")).asJava)
 			AssessmentManager.updateNode(updateRequest)
 			})
 		}
