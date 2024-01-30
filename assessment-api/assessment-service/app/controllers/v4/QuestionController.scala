@@ -9,7 +9,7 @@ import org.sunbird.common.dto.Response
 import org.sunbird.utils.AssessmentConstants
 import play.api.libs.json.Json
 import play.api.mvc.{ControllerComponents, Result}
-import utils.{ActorNames, ApiId, JavaJsonUtils, QuestionOperations}
+import utils.{ActorNames, ApiId, Constants, JavaJsonUtils, QuestionOperations}
 
 import javax.inject.{Inject, Named}
 import scala.collection.JavaConverters._
@@ -22,7 +22,6 @@ class QuestionController @Inject()(@Named(ActorNames.QUESTION_ACTOR) questionAct
   val objectType = "Question"
   val schemaName: String = "question"
   val version = "1.0"
-  val frameworkUrl = "https://uphrh.in/api/framework/v1/read/nirayama_frccl_fw?categories=difficultyLevel,subject"
 
   private val logger: Logger = LoggerFactory.getLogger(RedisCache.getClass.getCanonicalName)
 
@@ -143,7 +142,7 @@ class QuestionController @Inject()(@Named(ActorNames.QUESTION_ACTOR) questionAct
       val validatedQuestions: List[Map[String, Any]] = QuestionExcelParser.validateQuestions(questions)
 
       // Step 3: Read framework from the API
-      val frameworkMap = QuestionExcelParser.frameworkRead(frameworkUrl)
+      val frameworkMap = QuestionExcelParser.frameworkRead(Constants.frameworkUrl)
 
       // Step 4: Check if questions are valid against the framework
       val isQuestionsValid: Boolean = validatedQuestions.forall { question =>
