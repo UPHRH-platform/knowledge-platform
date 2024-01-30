@@ -739,7 +739,7 @@
         "lastUpdatedBy": {
             "type": "string"
         },
-        "reviewedBy": {
+        "reviewerId": {
             "type": "string"
         },
         "lastSubmittedBy": {
