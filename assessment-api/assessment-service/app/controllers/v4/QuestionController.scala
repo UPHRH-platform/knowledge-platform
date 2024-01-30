@@ -142,7 +142,7 @@ class QuestionController @Inject()(@Named(ActorNames.QUESTION_ACTOR) questionAct
       val validatedQuestions: List[Map[String, Any]] = QuestionExcelParser.validateQuestions(questions)
 
       // Step 3: Read framework from the API
-      val frameworkMap = QuestionExcelParser.frameworkRead(Constants.frameworkUrl)
+      val frameworkMap = QuestionExcelParser.frameworkRead(AssessmentConstants.FRAMEWORK_READ_URL)
 
       // Step 4: Check if questions are valid against the framework
       val isQuestionsValid: Boolean = validatedQuestions.forall { question =>

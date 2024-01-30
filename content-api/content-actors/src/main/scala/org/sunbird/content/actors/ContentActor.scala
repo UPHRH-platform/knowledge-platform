@@ -1,32 +1,31 @@
 package org.sunbird.content.actors
 
-import java.util
-import java.util.concurrent.CompletionException
-import java.io.File
 import org.apache.commons.io.FilenameUtils
-
-import javax.inject.Inject
 import org.apache.commons.lang3.StringUtils
 import org.sunbird.`object`.importer.{ImportConfig, ImportManager}
 import org.sunbird.actor.core.BaseActor
 import org.sunbird.cache.impl.RedisCache
-import org.sunbird.content.util.{AcceptFlagManager, ContentConstants, CopyManager, DiscardManager, FlagManager, RetireManager}
 import org.sunbird.cloudstore.StorageService
-import org.sunbird.common.{ContentParams, Platform, Slug}
 import org.sunbird.common.dto.{Request, Response, ResponseHandler}
 import org.sunbird.common.exception.ClientException
+import org.sunbird.common.{ContentParams, Platform, Slug}
 import org.sunbird.content.dial.DIALManager
 import org.sunbird.content.publish.mgr.PublishManager
 import org.sunbird.content.review.mgr.ReviewManager
-import org.sunbird.util.RequestUtil
 import org.sunbird.content.upload.mgr.UploadManager
+import org.sunbird.content.util._
 import org.sunbird.graph.OntologyEngineContext
 import org.sunbird.graph.dac.model.Node
 import org.sunbird.graph.nodes.DataNode
 import org.sunbird.graph.utils.NodeUtil
 import org.sunbird.managers.HierarchyManager
 import org.sunbird.managers.HierarchyManager.hierarchyPrefix
+import org.sunbird.util.RequestUtil
 
+import java.io.File
+import java.util
+import java.util.concurrent.CompletionException
+import javax.inject.Inject
 import scala.collection.JavaConverters
 import scala.collection.JavaConverters._
 import scala.concurrent.{ExecutionContext, Future}
@@ -328,7 +327,7 @@ class ContentActor @Inject() (implicit oec: OntologyEngineContext, ss: StorageSe
       else new ClientException("ERR_INVALID_REQUEST", "Content not in Review status.")
 
 			request.getRequest.put("versionKey", node.getMetadata.get("versionKey"))
-			request.getRequest.put("rejectedBy", "rejectedBy")
+			request.getRequest.put("reviewedBy", "reviewedBy")
 			request.putIn("publishChecklist", null).putIn("publishComment", null)
       //updating node after changing the status
 			RequestUtil.restrictProperties(request)

@@ -40,9 +40,6 @@ public class Constants {
     public static String subject = "subject";
     public static String gradeLevel = "gradeLevel";
     public static String difficultyLevel = "difficultyLevel";
-    public static String frameworkUrl = "https://uphrh.in/api/framework/v1/read/nirayama_frccl_fw?categories=difficultyLevel,subject";
-
-
 
     private Constants() {
     }
