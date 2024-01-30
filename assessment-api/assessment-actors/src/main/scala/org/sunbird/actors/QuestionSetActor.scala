@@ -1,23 +1,22 @@
 package org.sunbird.actors
 
-import java.util
-
-import javax.inject.Inject
-import org.slf4j.{Logger, LoggerFactory}
 import org.apache.commons.collections4.CollectionUtils
 import org.apache.commons.lang3.StringUtils
+import org.slf4j.{Logger, LoggerFactory}
 import org.sunbird.`object`.importer.{ImportConfig, ImportManager}
 import org.sunbird.actor.core.BaseActor
 import org.sunbird.cache.impl.RedisCache
-import org.sunbird.common.{DateUtils, Platform}
 import org.sunbird.common.dto.{Request, Response, ResponseHandler}
+import org.sunbird.common.{DateUtils, Platform}
 import org.sunbird.graph.OntologyEngineContext
-import org.sunbird.graph.nodes.DataNode
 import org.sunbird.graph.dac.model.Node
+import org.sunbird.graph.nodes.DataNode
 import org.sunbird.managers.HierarchyManager.hierarchyPrefix
 import org.sunbird.managers.{AssessmentManager, CopyManager, HierarchyManager, UpdateHierarchyManager}
 import org.sunbird.utils.RequestUtil
 
+import java.util
+import javax.inject.Inject
 import scala.collection.JavaConverters._
 import scala.concurrent.{ExecutionContext, Future}
 
@@ -107,7 +106,7 @@ class QuestionSetActor @Inject()(implicit oec: OntologyEngineContext) extends Ba
 				val (updatedHierarchy, nodeIds) = AssessmentManager.updateHierarchy(hierarchyString.asInstanceOf[String], "Draft", node.getMetadata.getOrDefault("createdBy", "").asInstanceOf[String])
 				val updateReq = new Request(request)
 				val date = DateUtils.formatCurrentDate
-				updateReq.putAll(Map("identifiers" -> nodeIds, "metadata" -> Map("status" -> "Rejected", "prevStatus" -> node.getMetadata.get("status"), "lastStatusChangedOn" -> date, "lastUpdatedOn" -> date).asJava).asJava)
+				updateReq.putAll(Map("identifiers" -> nodeIds, "metadata" -> Map("status" -> "Rejected", "prevStatus" -> node.getMetadata.get("status"), "lastStatusChangedOn" -> date, "lastUpdatedOn" -> date, "reviewerId" -> node.getMetadata.get("reviewerId")).asJava).asJava)
 				val metadata: Map[String, AnyRef] = Map("status" -> "Draft", "hierarchy" -> updatedHierarchy)
 				val updatedMetadata = if(request.getRequest.containsKey("rejectComment")) (metadata ++ Map("rejectComment" -> request.get("rejectComment").asInstanceOf[String])) else metadata
 				updateHierarchyNodes(updateReq, node, updatedMetadata, nodeIds)

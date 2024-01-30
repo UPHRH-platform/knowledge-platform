@@ -412,6 +412,9 @@
     "lastUpdatedBy": {
       "type": "string"
     },
+    "reviewerId": {
+      "type": "string"
+    },
     "lastSubmittedOn": {
       "type": "string"
     },

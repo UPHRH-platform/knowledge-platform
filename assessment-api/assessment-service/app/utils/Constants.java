@@ -41,9 +41,6 @@ public class Constants {
     public static String gradeLevel = "gradeLevel";
     public static String difficultyLevel = "difficultyLevel";
 
-
-
-
     private Constants() {
     }
 }

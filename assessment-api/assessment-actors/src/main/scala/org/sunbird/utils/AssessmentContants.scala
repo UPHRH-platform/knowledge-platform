@@ -69,6 +69,7 @@ object AssessmentConstants {
   val MAX_SCORE = "maxScore"
   val MULTIPLE = "multiple"
   val QUESTION_LIST_EDITOR_URL = "question.list.search.editor.url"
+  val FRAMEWORK_READ_URL = "framework.read.url"
   val EDITOR_STATE = "editorState"
   val PARAMS = "params"
   val OPTIONS = "options"
