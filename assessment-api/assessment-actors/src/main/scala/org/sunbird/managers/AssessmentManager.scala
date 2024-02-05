@@ -1,28 +1,25 @@
 package org.sunbird.managers
 
-import com.fasterxml.jackson.databind.{JsonNode, ObjectMapper}
 import com.fasterxml.jackson.databind.node.{ArrayNode, ObjectNode}
+import com.fasterxml.jackson.databind.{JsonNode, ObjectMapper}
 import com.mashape.unirest.http.Unirest
-
-import java.util
-import org.slf4j.{Logger, LoggerFactory}
 import org.apache.commons.lang3.StringUtils
-import org.sunbird.common.{DateUtils, JsonUtils, Platform}
+import org.slf4j.{Logger, LoggerFactory}
 import org.sunbird.common.dto.{Request, Response, ResponseHandler}
-import org.sunbird.common.exception.{ClientException, ErrorCodes, ResourceNotFoundException, ServerException}
+import org.sunbird.common.exception.{ClientException, ErrorCodes, ServerException}
+import org.sunbird.common.{DateUtils, JsonUtils, Platform}
 import org.sunbird.graph.OntologyEngineContext
 import org.sunbird.graph.dac.model.{Node, Relation}
 import org.sunbird.graph.nodes.DataNode
 import org.sunbird.graph.utils.NodeUtil
-import org.sunbird.managers.AssessmentManager.{hideCorrectResponse, hideEditorStateAns}
-import org.sunbird.telemetry.logger.TelemetryManager
 import org.sunbird.telemetry.util.LogTelemetryEventUtil
-import org.sunbird.utils.{AssessmentConstants, JavaJsonUtils, JwtUtils, RequestUtil}
+import org.sunbird.utils.{AssessmentConstants, JavaJsonUtils, RequestUtil}
 
-import scala.concurrent.{ExecutionContext, Future}
+import java.util
 import scala.collection.JavaConversions._
 import scala.collection.JavaConverters
 import scala.collection.JavaConverters._
+import scala.concurrent.{ExecutionContext, Future}
 
 object AssessmentManager {
 

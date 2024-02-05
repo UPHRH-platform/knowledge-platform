@@ -1,6 +1,7 @@
 package controllers.v4
 
 import akka.actor.{ActorRef, ActorSystem}
+import com.typesafe.config.ConfigFactory
 import controllers.BaseController
 import handlers.{CompetencyExcelParser, QuestionExcelParser}
 import org.slf4j.{Logger, LoggerFactory}
@@ -8,8 +9,8 @@ import org.sunbird.cache.impl.RedisCache
 import org.sunbird.common.dto.Response
 import org.sunbird.utils.AssessmentConstants
 import play.api.libs.json.Json
-import play.api.mvc.{ControllerComponents, Result}
-import utils.{ActorNames, ApiId, Constants, JavaJsonUtils, QuestionOperations}
+import play.api.mvc.ControllerComponents
+import utils.{ActorNames, ApiId, JavaJsonUtils, QuestionOperations}
 
 import javax.inject.{Inject, Named}
 import scala.collection.JavaConverters._
@@ -24,6 +25,7 @@ class QuestionController @Inject()(@Named(ActorNames.QUESTION_ACTOR) questionAct
   val version = "1.0"
 
   private val logger: Logger = LoggerFactory.getLogger(RedisCache.getClass.getCanonicalName)
+  private lazy val config = ConfigFactory.load()
 
   def create() = Action.async { implicit request =>
     val headers = commonHeaders()
@@ -133,53 +135,63 @@ class QuestionController @Inject()(@Named(ActorNames.QUESTION_ACTOR) questionAct
 
   //Create question by uploading excel file
   def uploadExcel() = Action(parse.multipartFormData) { implicit request =>
-    val result: Option[Result] = request.body.file("file").map { filePart =>
-      val absolutePath = filePart.ref.path.toAbsolutePath
-      val fileName: String = filePart.filename
-      val questions: Option[IndexedSeq[Map[String, AnyRef]]] = QuestionExcelParser.getQuestions(fileName, absolutePath.toFile)
-
-      // Step 2: Validate questions based on competency and competency levels
-      val validatedQuestions: List[Map[String, Any]] = QuestionExcelParser.validateQuestions(questions)
-
-      // Step 3: Read framework from the API
-      val frameworkMap = QuestionExcelParser.frameworkRead(AssessmentConstants.FRAMEWORK_READ_URL)
-
-      // Step 4: Check if questions are valid against the framework
-      val isQuestionsValid: Boolean = validatedQuestions.forall { question =>
-        val competency: Seq[String] = question.getOrElse("subject", new java.util.ArrayList[String]()).asInstanceOf[java.util.ArrayList[String]].asScala
-        val difficultyLevel: Seq[String] = question.getOrElse("difficultyLevel", new java.util.ArrayList[String]()).asInstanceOf[java.util.ArrayList[String]].asScala
-
-        // Check if competency and competencyLevels are present in the framework
-        competency.forall(frameworkMap.contains) && difficultyLevel.forall(level => frameworkMap.getOrElse(level, Map.empty).nonEmpty)
+    logger.info("Inside upload excel")
+    val questions = request.body
+      .file("file")
+      .map { filePart =>
+        val absolutePath = filePart.ref.path.toAbsolutePath
+        val fileName: String = filePart.filename
+        QuestionExcelParser.getQuestions(fileName, absolutePath.toFile)
       }
+    logger.info("Questions: " + questions)
 
-      if (isQuestionsValid) {
-        // Step 5: Process questions if valid
-        val futures = validatedQuestions.map { question =>
-          val headers = commonHeaders(request.headers)
-          val javaQuestion: java.util.Map[String, AnyRef] = question.mapValues(_.asInstanceOf[AnyRef]).asJava
-          val questionRequest = getRequest(javaQuestion, headers, QuestionOperations.createQuestionByBulkUpload.toString)
-          setRequestContext(questionRequest, version, objectType, schemaName)
-          getResponse(ApiId.CREATE_QUESTION, questionActor, questionRequest)
-        }
+    // Step 1: Extract subject and difficultyLevel from questions
+    val (subjects, difficultyLevels) = QuestionExcelParser.extractSubjectAndDifficultyLevel(questions)
 
-        // Step 6: Await and handle the result
-        val f = Future.sequence(futures).map(results => results.map(_.asInstanceOf[Response]).groupBy(_.getResponseCode.toString).mapValues(listResult => {
-          listResult.map(result => {
-            setResponseEnvelope(result)
-            JavaJsonUtils.serialize(result.getResult)
-          })
-        })).map(f => Ok(Json.stringify(Json.toJson(f))).as("application/json"))
+    logger.info("Extracted Subjects: " + subjects)
+    logger.info("Extracted Difficulty Levels: " + difficultyLevels)
 
-        Await.result(f, Duration.apply("300s"))
-      } else {
-        // If questions are not valid, respond with an error
-        BadRequest("Invalid questions: competency or competencyLevels not present in the framework")
-      }
+    // Step 2: Read framework from the API
+    val FRAMEWORK_READ_URL: String = config.getString("framework.read.url")
+    val frameworkMap = QuestionExcelParser.frameworkRead(FRAMEWORK_READ_URL)
+    logger.info("Framework Map: " + frameworkMap)
+
+    // Step 3: Check if questions are valid against the framework
+    // Use the extracted subjects and difficulty levels directly
+    val isQuestionsValid: Boolean = subjects.forall { competency =>
+      frameworkMap.contains(competency) && difficultyLevels.forall(frameworkMap(competency).contains)
     }
+    logger.info("Are questions valid? " + isQuestionsValid)
 
-    // Return the result or a default BadRequest if the file is not present
-    result.getOrElse(BadRequest("File not provided"))
+//        val isQuestionsValid = true
+    if (isQuestionsValid) {
+      logger.info("questions after parsing " + questions)
+      val futures = questions.get.map(question => {
+        val headers = commonHeaders(request.headers)
+        headers.put("channel", question.get("channel"))
+        question.putAll(headers)
+        logger.info("put headers  " + headers)
+        logger.info("creating question := {}", questions.toString)
+        val questionRequest = getRequest(question, headers, QuestionOperations.createQuestionByBulkUpload.toString)
+        logger.info("After the questionRequest")
+        setRequestContext(questionRequest, version, objectType, schemaName)
+        logger.info("After the setRequestContext")
+        getResponse(ApiId.CREATE_QUESTION, questionActor, questionRequest)
+      }
+      )
+      logger.info("After the getResponse")
+      val f = Future.sequence(futures).map(results => results.map(_.asInstanceOf[Response]).groupBy(_.getResponseCode.toString).mapValues(listResult => {
+        listResult.map(result => {
+          setResponseEnvelope(result)
+          JavaJsonUtils.serialize(result.getResult)
+        })
+      })).map(f => Ok(Json.stringify(Json.toJson(f))).as("application/json"))
+      logger.info("in Future sequence")
+      Await.result(f, Duration.apply("300s"))
+    } else {
+      // If questions are not valid, respond with an error
+      BadRequest("Invalid questions: competency or competencyLevels not present in the framework")
+    }
   }
 
   def createFrameworkMappingData() = Action(parse.multipartFormData) { implicit request =>
@@ -251,7 +263,6 @@ class QuestionController @Inject()(@Named(ActorNames.QUESTION_ACTOR) questionAct
   def read(identifier: String, mode: Option[String], fields: Option[String]) = {
     readQuestion(identifier, mode, fields, false)
   }
-
   def readQuestion(identifier: String, mode: Option[String], fields: Option[String], exclusive: Boolean) = Action.async { implicit request =>
     val headers = commonHeaders()
     val question = new java.util.HashMap().asInstanceOf[java.util.Map[String, Object]]
